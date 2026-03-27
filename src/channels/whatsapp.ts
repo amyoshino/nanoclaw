@@ -16,7 +16,13 @@ import {
   ASSISTANT_NAME,
   STORE_DIR,
 } from '../config.js';
-import { getLastGroupSync, getLatestMessage, setLastGroupSync, storeReaction, updateChatName } from '../db.js';
+import {
+  getLastGroupSync,
+  getLatestMessage,
+  setLastGroupSync,
+  storeReaction,
+  updateChatName,
+} from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -24,6 +30,7 @@ import {
   OnChatMetadata,
   RegisteredGroup,
 } from '../types.js';
+import { registerChannel, ChannelOpts } from './registry.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -77,6 +84,7 @@ export class WhatsAppChannel implements Channel {
       printQRInTerminal: false,
       logger,
       browser: Browsers.macOS('Chrome'),
+      markOnlineOnConnect: false,
     });
 
     this.sock.ev.on('connection.update', (update) => {
@@ -124,11 +132,6 @@ export class WhatsAppChannel implements Channel {
       } else if (connection === 'open') {
         this.connected = true;
         logger.info('Connected to WhatsApp');
-
-        // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
-        this.sock.sendPresenceUpdate('available').catch((err) => {
-          logger.warn({ err }, 'Failed to send presence update');
-        });
 
         // Build LID to phone mapping from auth state for self-chat translation
         if (this.sock.user) {
@@ -242,7 +245,8 @@ export class WhatsAppChannel implements Channel {
           const chatJid = await this.translateJid(rawChatJid);
           const groups = this.opts.registeredGroups();
           if (!groups[chatJid]) continue;
-          const reactorJid = reaction.key?.participant || reaction.key?.remoteJid || '';
+          const reactorJid =
+            reaction.key?.participant || reaction.key?.remoteJid || '';
           const emoji = reaction.text || '';
           const timestamp = reaction.senderTimestampMs
             ? new Date(Number(reaction.senderTimestampMs)).toISOString()
@@ -262,7 +266,7 @@ export class WhatsAppChannel implements Channel {
               reactor: reactorJid.split('@')[0],
               emoji: emoji || '(removed)',
             },
-            emoji ? 'Reaction added' : 'Reaction removed'
+            emoji ? 'Reaction added' : 'Reaction removed',
           );
         } catch (err) {
           logger.error({ err }, 'Failed to process reaction');
@@ -303,8 +307,13 @@ export class WhatsAppChannel implements Channel {
 
   async sendReaction(
     chatJid: string,
-    messageKey: { id: string; remoteJid: string; fromMe?: boolean; participant?: string },
-    emoji: string
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
+    emoji: string,
   ): Promise<void> {
     if (!this.connected) {
       logger.warn({ chatJid, emoji }, 'Cannot send reaction - not connected');
@@ -320,7 +329,7 @@ export class WhatsAppChannel implements Channel {
           messageId: messageKey.id?.slice(0, 10) + '...',
           emoji: emoji || '(removed)',
         },
-        emoji ? 'Reaction sent' : 'Reaction removed'
+        emoji ? 'Reaction sent' : 'Reaction removed',
       );
     } catch (err) {
       logger.error({ chatJid, emoji, err }, 'Failed to send reaction');
@@ -457,3 +466,5 @@ export class WhatsAppChannel implements Channel {
     }
   }
 }
+
+registerChannel('whatsapp', (opts: ChannelOpts) => new WhatsAppChannel(opts));
