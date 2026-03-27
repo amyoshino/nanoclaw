@@ -11,11 +11,47 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'container';
 
-/** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+/**
+ * Detect the host IP on the Apple Container bridge network.
+ * Apple Container creates a bridge100 interface with 192.168.64.x addressing.
+ * Returns the host's IP on that bridge, or null if not found.
+ */
+function detectAppleContainerBridgeIP(): string | null {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    if (name.startsWith('bridge')) {
+      const ipv4 = ifaces[name]?.find(
+        (a) => a.family === 'IPv4' && a.address.startsWith('192.168.64.'),
+      );
+      if (ipv4) return ipv4.address;
+    }
+  }
+  return null;
+}
+
+/**
+ * Hostname/IP containers use to reach the host machine.
+ * Apple Container: host is at the bridge IP (e.g. 192.168.64.1) — detected at runtime.
+ * Docker Desktop: host.docker.internal resolves automatically.
+ * Overridable via CONTAINER_HOST_GATEWAY env var.
+ */
+function detectHostGateway(): string {
+  if (
+    os.platform() === 'darwin' &&
+    CONTAINER_RUNTIME_BIN === 'container'
+  ) {
+    return detectAppleContainerBridgeIP() ?? '192.168.64.1';
+  }
+  return 'host.docker.internal';
+}
+
+export const CONTAINER_HOST_GATEWAY =
+  process.env.CONTAINER_HOST_GATEWAY || detectHostGateway();
 
 /**
  * Address the credential proxy binds to.
+ * Apple Container (macOS): bind to all interfaces — the VM is on a bridge network
+ *   (192.168.64.x) and cannot reach the host's loopback.
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
  *   falling back to 0.0.0.0 if the interface isn't found.
@@ -24,7 +60,11 @@ export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
+  if (os.platform() === 'darwin') {
+    // Apple Container VMs are on a separate bridge network — must bind to all interfaces
+    if (CONTAINER_RUNTIME_BIN === 'container') return '0.0.0.0';
+    return '127.0.0.1';
+  }
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
@@ -50,8 +90,14 @@ export function hostGatewayArgs(): string[] {
 }
 
 /** Returns CLI args for a readonly bind mount. */
-export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
-  return ['--mount', `type=bind,source=${hostPath},target=${containerPath},readonly`];
+export function readonlyMountArgs(
+  hostPath: string,
+  containerPath: string,
+): string[] {
+  return [
+    '--mount',
+    `type=bind,source=${hostPath},target=${containerPath},readonly`,
+  ];
 }
 
 /** Returns the shell command to stop a container by name. */
@@ -67,7 +113,10 @@ export function ensureContainerRuntimeRunning(): void {
   } catch {
     logger.info('Starting container runtime...');
     try {
-      execSync(`${CONTAINER_RUNTIME_BIN} system start`, { stdio: 'pipe', timeout: 30000 });
+      execSync(`${CONTAINER_RUNTIME_BIN} system start`, {
+        stdio: 'pipe',
+        timeout: 30000,
+      });
       logger.info('Container runtime started');
     } catch (err) {
       logger.error({ err }, 'Failed to start container runtime');
@@ -107,17 +156,26 @@ export function cleanupOrphans(): void {
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
+    const containers: { status: string; configuration: { id: string } }[] =
+      JSON.parse(output || '[]');
     const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
+      .filter(
+        (c) =>
+          c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'),
+      )
       .map((c) => c.configuration.id);
     for (const name of orphans) {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });
-      } catch { /* already stopped */ }
+      } catch {
+        /* already stopped */
+      }
     }
     if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      logger.info(
+        { count: orphans.length, names: orphans },
+        'Stopped orphaned containers',
+      );
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
