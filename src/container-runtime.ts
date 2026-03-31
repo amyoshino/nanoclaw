@@ -36,10 +36,7 @@ function detectAppleContainerBridgeIP(): string | null {
  * Overridable via CONTAINER_HOST_GATEWAY env var.
  */
 function detectHostGateway(): string {
-  if (
-    os.platform() === 'darwin' &&
-    CONTAINER_RUNTIME_BIN === 'container'
-  ) {
+  if (os.platform() === 'darwin' && CONTAINER_RUNTIME_BIN === 'container') {
     return detectAppleContainerBridgeIP() ?? '192.168.64.1';
   }
   return 'host.docker.internal';
