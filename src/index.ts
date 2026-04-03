@@ -8,6 +8,7 @@ import {
   getTriggerPattern,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  MAX_MESSAGES_PER_PROMPT,
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';

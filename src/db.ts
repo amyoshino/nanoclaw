@@ -2,7 +2,12 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, MAX_MESSAGES_PER_PROMPT, STORE_DIR } from './config.js';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  MAX_MESSAGES_PER_PROMPT,
+  STORE_DIR,
+} from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -159,15 +164,11 @@ function createSchema(database: Database.Database): void {
 
   // Add reply context columns if they don't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`,
-    );
+    database.exec(`ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`);
     database.exec(
       `ALTER TABLE messages ADD COLUMN reply_to_message_content TEXT`,
     );
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT`,
-    );
+    database.exec(`ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT`);
   } catch {
     /* columns already exist */
   }
@@ -346,6 +347,7 @@ export function getNewMessages(
   jids: string[],
   lastTimestamp: string,
   botPrefix: string,
+  limit: number = MAX_MESSAGES_PER_PROMPT,
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
@@ -367,7 +369,12 @@ export function getNewMessages(
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, MAX_MESSAGES_PER_PROMPT) as NewMessage[];
+    .all(
+      lastTimestamp,
+      ...jids,
+      `${botPrefix}:%`,
+      limit,
+    ) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -381,6 +388,7 @@ export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
+  limit: number = MAX_MESSAGES_PER_PROMPT,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
@@ -398,7 +406,12 @@ export function getMessagesSince(
   `;
   return db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, MAX_MESSAGES_PER_PROMPT) as NewMessage[];
+    .all(
+      chatJid,
+      sinceTimestamp,
+      `${botPrefix}:%`,
+      limit,
+    ) as NewMessage[];
 }
 
 export function getMessageFromMe(messageId: string, chatJid: string): boolean {

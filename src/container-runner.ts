@@ -78,17 +78,8 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
-    }
+    // .env shadowing is handled inside the container entrypoint via mount --bind
+    // (Apple Container only supports directory mounts, not file mounts like /dev/null)
 
     // Main gets writable access to the store (SQLite DB) so it can
     // query and write to the database directly.

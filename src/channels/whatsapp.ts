@@ -28,6 +28,14 @@ import {
 } from '../db.js';
 import { isImageMessage, processImage } from '../image.js';
 import { logger } from '../logger.js';
+
+// Baileys requires ILogger with level, child, and trace — wrap our logger.
+const baileysLogger = {
+  ...logger,
+  level: process.env.LOG_LEVEL || 'silent',
+  trace: (...args: Parameters<typeof logger.debug>) => logger.debug(...args),
+  child: () => baileysLogger,
+};
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import {
   Channel,
@@ -84,10 +92,10 @@ export class WhatsAppChannel implements Channel {
       version,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+        keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
       },
       printQRInTerminal: false,
-      logger,
+      logger: baileysLogger,
       browser: Browsers.macOS('Chrome'),
       markOnlineOnConnect: false,
     });
