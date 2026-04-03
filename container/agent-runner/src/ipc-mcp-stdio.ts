@@ -156,7 +156,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       .string()
       .optional()
       .describe(
-        'Optional bash script to run before waking the agent. Script must output JSON on the last line of stdout: { "wakeAgent": boolean, "data"?: any }. If wakeAgent is false, the agent is not called.',
+        'Optional bash script to run before waking the agent. Script must output JSON on the last line of stdout: { "wakeAgent": boolean, "data"?: any }. If wakeAgent is false, the agent is not called. Test your script with bash -c "..." before scheduling.',
       ),
   },
   async (args) => {
@@ -221,6 +221,8 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     const targetJid =
       isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
+    const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
     const data = {
       type: 'schedule_task',
       prompt: args.prompt,
@@ -239,7 +241,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       content: [
         {
           type: 'text' as const,
-          text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}`,
+          text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}`,
         },
       ],
     };
@@ -405,16 +407,27 @@ server.tool(
     script: z
       .string()
       .optional()
-      .describe('New script for the task. Set to empty string to remove the script.'),
+      .describe(
+        'New script for the task. Set to empty string to remove the script.',
+      ),
   },
   async (args) => {
-    if (args.schedule_type === 'cron' || (!args.schedule_type && args.schedule_value)) {
+    // Validate schedule_value if provided
+    if (
+      args.schedule_type === 'cron' ||
+      (!args.schedule_type && args.schedule_value)
+    ) {
       if (args.schedule_value) {
         try {
           CronExpressionParser.parse(args.schedule_value);
         } catch {
           return {
-            content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}".` }],
+            content: [
+              {
+                type: 'text' as const,
+                text: `Invalid cron: "${args.schedule_value}".`,
+              },
+            ],
             isError: true,
           };
         }
@@ -424,7 +437,12 @@ server.tool(
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}".` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid interval: "${args.schedule_value}".`,
+            },
+          ],
           isError: true,
         };
       }
@@ -439,8 +457,10 @@ server.tool(
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
     if (args.script !== undefined) data.script = args.script;
-    if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
-    if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
+    if (args.schedule_type !== undefined)
+      data.schedule_type = args.schedule_type;
+    if (args.schedule_value !== undefined)
+      data.schedule_value = args.schedule_value;
 
     writeIpcFile(TASKS_DIR, data);
 
@@ -473,6 +493,12 @@ Use available_groups.json to find the JID for a group. The folder name must be c
         'Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")',
       ),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    requiresTrigger: z
+      .boolean()
+      .optional()
+      .describe(
+        'Whether messages must start with the trigger word. Default: false (respond to all messages). Set to true for busy groups with many participants where you only want the agent to respond when explicitly mentioned.',
+      ),
   },
   async (args) => {
     if (!isMain) {
@@ -493,6 +519,7 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       name: args.name,
       folder: args.folder,
       trigger: args.trigger,
+      requiresTrigger: args.requiresTrigger ?? false,
       timestamp: new Date().toISOString(),
     };
 
