@@ -90,7 +90,6 @@ function buildVolumeMounts(
       readonly: false,
     });
 
-
     // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,
