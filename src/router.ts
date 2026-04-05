@@ -4,7 +4,10 @@ import { formatLocalTime } from './timezone.js';
 export function escapeXml(s: string): string {
   if (!s) return '';
   // Strip lone surrogates (unpaired UTF-16 surrogates are invalid in JSON)
-  const safe = s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+  const safe = s.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '\uFFFD',
+  );
   return safe
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

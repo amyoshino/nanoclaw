@@ -20,7 +20,10 @@ import {
 /** Replace lone UTF-16 surrogates with U+FFFD so they don't break JSON serialization. */
 function sanitizeText(s: string | null | undefined): string | null {
   if (s == null) return null;
-  return s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+  return s.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '\uFFFD',
+  );
 }
 
 let db: Database.Database;
