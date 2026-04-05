@@ -27,6 +27,7 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { readEnvFile } from './env.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -249,6 +250,12 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Forward model override if set in .env (e.g. ANTHROPIC_MODEL=claude-haiku-4-5-20251001)
+  const { ANTHROPIC_MODEL } = readEnvFile(['ANTHROPIC_MODEL']);
+  if (ANTHROPIC_MODEL) {
+    args.push('-e', `ANTHROPIC_MODEL=${ANTHROPIC_MODEL}`);
   }
 
   // Runtime-specific args for host gateway resolution

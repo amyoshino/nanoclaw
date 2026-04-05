@@ -17,6 +17,12 @@ import {
   TaskRunLog,
 } from './types.js';
 
+/** Replace lone UTF-16 surrogates with U+FFFD so they don't break JSON serialization. */
+function sanitizeText(s: string | null | undefined): string | null {
+  if (s == null) return null;
+  return s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+}
+
 let db: Database.Database;
 
 export interface Reaction {
@@ -305,14 +311,14 @@ export function storeMessage(msg: NewMessage): void {
     msg.id,
     msg.chat_jid,
     msg.sender,
-    msg.sender_name,
-    msg.content,
+    sanitizeText(msg.sender_name),
+    sanitizeText(msg.content),
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
     msg.reply_to_message_id ?? null,
-    msg.reply_to_message_content ?? null,
-    msg.reply_to_sender_name ?? null,
+    sanitizeText(msg.reply_to_message_content),
+    sanitizeText(msg.reply_to_sender_name),
   );
 }
 
@@ -335,8 +341,8 @@ export function storeMessageDirect(msg: {
     msg.id,
     msg.chat_jid,
     msg.sender,
-    msg.sender_name,
-    msg.content,
+    sanitizeText(msg.sender_name),
+    sanitizeText(msg.content),
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
@@ -742,6 +748,7 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
+        is_main: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -763,6 +770,7 @@ export function getRegisteredGroup(
       : undefined,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    isMain: row.is_main === 1,
   };
 }
 
@@ -793,6 +801,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
+    is_main: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -813,6 +822,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         : undefined,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      isMain: row.is_main === 1,
     };
   }
   return result;
