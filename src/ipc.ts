@@ -1,3 +1,4 @@
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -30,6 +31,69 @@ export interface IpcDeps {
   onTasksChanged: () => void;
   statusHeartbeat?: () => void;
   recoverPendingMessages?: () => void;
+}
+
+type AllowlistEntry =
+  | { match: 'exact'; command: string; cwd?: string }
+  | {
+      match: 'command_with_flags';
+      command: string;
+      allowed_flags: string[];
+      cwd?: string;
+    };
+
+function checkAllowlist(command: string): { allowed: false } | { allowed: true; cwd?: string } {
+  const allowlistPath = path.join(DATA_DIR, 'host-exec-allowlist.json');
+  let entries: AllowlistEntry[];
+  try {
+    entries = JSON.parse(fs.readFileSync(allowlistPath, 'utf-8'));
+  } catch {
+    logger.warn(
+      'host-exec-allowlist.json not found or invalid — all commands blocked',
+    );
+    return { allowed: false };
+  }
+
+  const trimmed = command.trim();
+  for (const entry of entries) {
+    if (entry.match === 'exact' && trimmed === entry.command.trim()) {
+      return { allowed: true, cwd: entry.cwd };
+    }
+    if (
+      entry.match === 'command_with_flags' &&
+      matchesCommandWithFlags(trimmed, entry.command, entry.allowed_flags)
+    ) {
+      return { allowed: true, cwd: entry.cwd };
+    }
+  }
+  return { allowed: false };
+}
+
+function matchesCommandWithFlags(
+  command: string,
+  baseCommand: string,
+  allowedFlags: string[],
+): boolean {
+  const tokens = command.split(/\s+/);
+  const baseTokens = baseCommand.trim().split(/\s+/);
+
+  if (tokens.length < baseTokens.length) return false;
+  for (let i = 0; i < baseTokens.length; i++) {
+    if (tokens[i] !== baseTokens[i]) return false;
+  }
+
+  // Remaining tokens must be --flag value pairs
+  const rest = tokens.slice(baseTokens.length);
+  if (rest.length % 2 !== 0) return false;
+
+  for (let i = 0; i < rest.length; i += 2) {
+    const flag = rest[i];
+    const value = rest[i + 1];
+    if (!allowedFlags.includes(flag)) return false;
+    // Reject shell metacharacters in values
+    if (/[;&|`$<>\\()\n\r]/.test(value)) return false;
+  }
+  return true;
 }
 
 let ipcWatcherRunning = false;
@@ -230,6 +294,10 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For host_exec
+    id?: string;
+    command?: string;
+    showTerminal?: boolean;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -516,6 +584,69 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'host_exec': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized host_exec attempt blocked');
+        break;
+      }
+      const { id, command, showTerminal } = data;
+      if (!id || !command) {
+        logger.warn({ data }, 'host_exec missing id or command');
+        break;
+      }
+
+      const allowlistResult = checkAllowlist(command);
+      if (!allowlistResult.allowed) {
+        logger.warn({ command, sourceGroup }, 'host_exec blocked — not in allowlist');
+        const resultDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'host_exec_results');
+        fs.mkdirSync(resultDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(resultDir, `${id}.json`),
+          JSON.stringify({ id, output: '', exitCode: 1, error: `Command not allowed: "${command}". Check data/host-exec-allowlist.json.` }),
+        );
+        break;
+      }
+
+      const execCwd = allowlistResult.cwd;
+      const resultDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'host_exec_results');
+      const resultPath = path.join(resultDir, `${id}.json`);
+      fs.mkdirSync(resultDir, { recursive: true });
+
+      // Open a visible Terminal.app window via a .command file (reliable with complex paths)
+      if (showTerminal !== false) {
+        const scriptPath = `/tmp/nanoclaw_exec_${id}.command`;
+        const scriptLines = [
+          '#!/bin/bash',
+          `echo "=== NanoClaw: ${command.replace(/"/g, '\\"')} ==="`,
+          execCwd ? `cd "${execCwd}"` : '',
+          command,
+          'echo',
+          'echo "--- Press Enter to close ---"',
+          'read',
+        ]
+          .filter(Boolean)
+          .join('\n');
+        fs.writeFileSync(scriptPath, scriptLines + '\n');
+        fs.chmodSync(scriptPath, '755');
+        exec(`open -a Terminal ${scriptPath}`, (err) => {
+          if (err) logger.warn({ err }, 'Failed to open Terminal window');
+        });
+      }
+
+      // Capture output independently
+      exec(command, { timeout: 60_000, ...(execCwd && { cwd: execCwd }) }, (error, stdout, stderr) => {
+        const result = {
+          id,
+          output: stdout + (stderr ? `\nSTDERR:\n${stderr}` : ''),
+          exitCode: error?.code ?? (error ? 1 : 0),
+          error: error ? error.message : null,
+        };
+        fs.writeFileSync(resultPath, JSON.stringify(result));
+        logger.info({ id, exitCode: result.exitCode }, 'host_exec complete');
+      });
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

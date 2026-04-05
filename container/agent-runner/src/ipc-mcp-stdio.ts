@@ -536,6 +536,77 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'run_on_host',
+  `Run a shell command on the host Mac. Opens a visible Terminal.app window so the user can watch it run. Also captures output and returns it. Main group only.
+
+Use for commands the user wants to see running on their machine (git, npm, scripts, etc.).
+Do NOT use for destructive operations without confirming with the user first.`,
+  {
+    command: z.string().describe('The shell command to run on the host'),
+    show_terminal: z
+      .boolean()
+      .default(true)
+      .describe('Open a visible Terminal.app window (default: true)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can run host commands.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'host_exec',
+      id,
+      command: args.command,
+      showTerminal: args.show_terminal ?? true,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Poll for result written by the host
+    const resultPath = path.join(IPC_DIR, 'host_exec_results', `${id}.json`);
+    const timeoutMs = 65_000;
+    const pollMs = 500;
+    const start = Date.now();
+
+    while (Date.now() - start < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      if (fs.existsSync(resultPath)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(resultPath, 'utf-8'));
+          try { fs.unlinkSync(resultPath); } catch { /* best-effort cleanup */ }
+          const text = result.error
+            ? `Exit ${result.exitCode}: ${result.error}\n${result.output || ''}`
+            : `Exit ${result.exitCode}:\n${result.output || '(no output)'}`;
+          return { content: [{ type: 'text' as const, text: text.trim() }] };
+        } catch {
+          // Result file not fully written yet, keep polling
+        }
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Command timed out after 60 seconds. The terminal window may still be running.',
+        },
+      ],
+      isError: true,
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
