@@ -538,7 +538,7 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 
 server.tool(
   'run_on_host',
-  `Run a shell command on the host Mac. Opens a visible Terminal.app window so the user can watch it run. Also captures output and returns it. Main group only.
+  `Run a shell command on the host Mac. Opens a visible Terminal.app window so the user can watch it run. Also captures output and returns it.
 
 Use for commands the user wants to see running on their machine (git, npm, scripts, etc.).
 Do NOT use for destructive operations without confirming with the user first.`,
@@ -550,18 +550,6 @@ Do NOT use for destructive operations without confirming with the user first.`,
       .describe('Open a visible Terminal.app window (default: true)'),
   },
   async (args) => {
-    if (!isMain) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'Only the main group can run host commands.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     writeIpcFile(TASKS_DIR, {

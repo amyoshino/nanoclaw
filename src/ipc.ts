@@ -34,15 +34,18 @@ export interface IpcDeps {
 }
 
 type AllowlistEntry =
-  | { match: 'exact'; command: string; cwd?: string }
+  | { match: 'exact'; command: string; cwd?: string; pre_command?: string }
   | {
       match: 'command_with_flags';
       command: string;
       allowed_flags: string[];
       cwd?: string;
+      pre_command?: string;
     };
 
-function checkAllowlist(command: string): { allowed: false } | { allowed: true; cwd?: string } {
+function checkAllowlist(
+  command: string,
+): { allowed: false } | { allowed: true; cwd?: string; pre_command?: string } {
   const allowlistPath = path.join(DATA_DIR, 'host-exec-allowlist.json');
   let entries: AllowlistEntry[];
   try {
@@ -57,13 +60,13 @@ function checkAllowlist(command: string): { allowed: false } | { allowed: true; 
   const trimmed = command.trim();
   for (const entry of entries) {
     if (entry.match === 'exact' && trimmed === entry.command.trim()) {
-      return { allowed: true, cwd: entry.cwd };
+      return { allowed: true, cwd: entry.cwd, pre_command: entry.pre_command };
     }
     if (
       entry.match === 'command_with_flags' &&
       matchesCommandWithFlags(trimmed, entry.command, entry.allowed_flags)
     ) {
-      return { allowed: true, cwd: entry.cwd };
+      return { allowed: true, cwd: entry.cwd, pre_command: entry.pre_command };
     }
   }
   return { allowed: false };
@@ -586,10 +589,6 @@ export async function processTaskIpc(
       break;
 
     case 'host_exec': {
-      if (!isMain) {
-        logger.warn({ sourceGroup }, 'Unauthorized host_exec attempt blocked');
-        break;
-      }
       const { id, command, showTerminal } = data;
       if (!id || !command) {
         logger.warn({ data }, 'host_exec missing id or command');
@@ -598,18 +597,37 @@ export async function processTaskIpc(
 
       const allowlistResult = checkAllowlist(command);
       if (!allowlistResult.allowed) {
-        logger.warn({ command, sourceGroup }, 'host_exec blocked — not in allowlist');
-        const resultDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'host_exec_results');
+        logger.warn(
+          { command, sourceGroup },
+          'host_exec blocked — not in allowlist',
+        );
+        const resultDir = path.join(
+          DATA_DIR,
+          'ipc',
+          sourceGroup,
+          'host_exec_results',
+        );
         fs.mkdirSync(resultDir, { recursive: true });
         fs.writeFileSync(
           path.join(resultDir, `${id}.json`),
-          JSON.stringify({ id, output: '', exitCode: 1, error: `Command not allowed: "${command}". Check data/host-exec-allowlist.json.` }),
+          JSON.stringify({
+            id,
+            output: '',
+            exitCode: 1,
+            error: `Command not allowed: "${command}". Check data/host-exec-allowlist.json.`,
+          }),
         );
         break;
       }
 
       const execCwd = allowlistResult.cwd;
-      const resultDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'host_exec_results');
+      const preCommand = allowlistResult.pre_command;
+      const resultDir = path.join(
+        DATA_DIR,
+        'ipc',
+        sourceGroup,
+        'host_exec_results',
+      );
       const resultPath = path.join(resultDir, `${id}.json`);
       fs.mkdirSync(resultDir, { recursive: true });
 
@@ -620,6 +638,7 @@ export async function processTaskIpc(
           '#!/bin/bash',
           `echo "=== NanoClaw: ${command.replace(/"/g, '\\"')} ==="`,
           execCwd ? `cd "${execCwd}"` : '',
+          preCommand ? preCommand : '',
           command,
           'echo',
           'echo "--- Press Enter to close ---"',
@@ -635,16 +654,20 @@ export async function processTaskIpc(
       }
 
       // Capture output independently
-      exec(command, { timeout: 60_000, ...(execCwd && { cwd: execCwd }) }, (error, stdout, stderr) => {
-        const result = {
-          id,
-          output: stdout + (stderr ? `\nSTDERR:\n${stderr}` : ''),
-          exitCode: error?.code ?? (error ? 1 : 0),
-          error: error ? error.message : null,
-        };
-        fs.writeFileSync(resultPath, JSON.stringify(result));
-        logger.info({ id, exitCode: result.exitCode }, 'host_exec complete');
-      });
+      exec(
+        command,
+        { timeout: 60_000, ...(execCwd && { cwd: execCwd }) },
+        (error, stdout, stderr) => {
+          const result = {
+            id,
+            output: stdout + (stderr ? `\nSTDERR:\n${stderr}` : ''),
+            exitCode: error?.code ?? (error ? 1 : 0),
+            error: error ? error.message : null,
+          };
+          fs.writeFileSync(resultPath, JSON.stringify(result));
+          logger.info({ id, exitCode: result.exitCode }, 'host_exec complete');
+        },
+      );
       break;
     }
 
