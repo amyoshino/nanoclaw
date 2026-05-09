@@ -32,6 +32,14 @@ function err(text: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${text}` }], isError: true };
 }
 
+function sanitizeText(value: unknown): string {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  return text.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '',
+  );
+}
+
 export const scheduleTask: McpToolDefinition = {
   tool: {
     name: 'schedule_task',
@@ -149,12 +157,19 @@ export const listTasks: McpToolDefinition = {
     if ((rows as unknown[]).length === 0) return ok('No tasks found.');
 
     const lines = (rows as Array<{ id: string; status: string; process_after: string | null; recurrence: string | null; content: string }>).map((r) => {
-      const content = JSON.parse(r.content);
-      const prompt = (content.prompt as string || '').slice(0, 80);
-      return `- ${r.id} [${r.status}] at=${r.process_after || 'now'} ${r.recurrence ? `recur=${r.recurrence} ` : ''}→ ${prompt}`;
+      let prompt = '';
+      try {
+        const content = JSON.parse(r.content);
+        prompt = [...sanitizeText(content?.prompt || '')].slice(0, 80).join('');
+      } catch {
+        prompt = '[invalid task payload]';
+      }
+      return sanitizeText(
+        `- ${r.id} [${r.status}] at=${r.process_after || 'now'} ${r.recurrence ? `recur=${r.recurrence} ` : ''}-> ${prompt}`,
+      );
     });
 
-    return ok(lines.join('\n'));
+    return ok(sanitizeText(lines.join('\n')));
   },
 };
 

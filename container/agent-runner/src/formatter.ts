@@ -2,6 +2,14 @@ import { findByRouting } from './destinations.js';
 import type { MessageInRow } from './db/messages-in.js';
 import { TIMEZONE, formatLocalTime } from './timezone.js';
 
+function sanitizeText(value: unknown): string {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  return text.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '',
+  );
+}
+
 /**
  * Command categories for messages starting with '/'.
  * - admin: sender must be in NANOCLAW_ADMIN_USER_IDS
@@ -169,9 +177,11 @@ function formatChatMessages(messages: MessageInRow[]): string {
 
 function formatSingleChat(msg: MessageInRow): string {
   const content = parseContent(msg.content);
-  const sender = content.sender || content.author?.fullName || content.author?.userName || 'Unknown';
+  const sender = sanitizeText(
+    content.sender || content.author?.fullName || content.author?.userName || 'Unknown',
+  );
   const time = formatLocalTime(msg.timestamp, TIMEZONE);
-  const text = content.text || '';
+  const text = sanitizeText(content.text || '');
   const idAttr = msg.seq != null ? ` id="${msg.seq}"` : '';
   const replyAttr = content.replyTo?.id ? ` reply_to="${escapeXml(String(content.replyTo.id))}"` : '';
   const replyPrefix = formatReplyContext(content.replyTo);
@@ -195,22 +205,22 @@ function formatTaskMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const parts = ['[SCHEDULED TASK]'];
   if (content.scriptOutput) {
-    parts.push('', 'Script output:', JSON.stringify(content.scriptOutput, null, 2));
+    parts.push('', 'Script output:', sanitizeText(JSON.stringify(content.scriptOutput, null, 2)));
   }
-  parts.push('', 'Instructions:', content.prompt || '');
+  parts.push('', 'Instructions:', sanitizeText(content.prompt || ''));
   return parts.join('\n');
 }
 
 function formatWebhookMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
-  const source = content.source || 'unknown';
-  const event = content.event || 'unknown';
-  return `[WEBHOOK: ${source}/${event}]\n\n${JSON.stringify(content.payload || content, null, 2)}`;
+  const source = sanitizeText(content.source || 'unknown');
+  const event = sanitizeText(content.event || 'unknown');
+  return `[WEBHOOK: ${source}/${event}]\n\n${sanitizeText(JSON.stringify(content.payload || content, null, 2))}`;
 }
 
 function formatSystemMessage(msg: MessageInRow): string {
   const content = parseContent(msg.content);
-  return `[SYSTEM RESPONSE]\n\nAction: ${content.action || 'unknown'}\nStatus: ${content.status || 'unknown'}\nResult: ${JSON.stringify(content.result || null)}`;
+  return `[SYSTEM RESPONSE]\n\nAction: ${sanitizeText(content.action || 'unknown')}\nStatus: ${sanitizeText(content.status || 'unknown')}\nResult: ${sanitizeText(JSON.stringify(content.result || null))}`;
 }
 
 /**
@@ -225,8 +235,8 @@ function formatSystemMessage(msg: MessageInRow): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function formatReplyContext(replyTo: any): string {
   if (!replyTo) return '';
-  const sender = replyTo.sender;
-  const text = replyTo.text;
+  const sender = sanitizeText(replyTo.sender);
+  const text = sanitizeText(replyTo.text);
   if (!sender || !text) return '';
   return `\n  <quoted_message from="${escapeXml(sender)}">${escapeXml(text)}</quoted_message>\n`;
 }
@@ -240,9 +250,11 @@ function formatAttachments(attachments: any[] | undefined): string {
     const localPath = a.localPath ? `/workspace/${a.localPath}` : '';
     const url = a.url || '';
     if (localPath) {
-      return `[${type}: ${escapeXml(name)} — saved to ${escapeXml(localPath)}]`;
+      return `[${sanitizeText(type)}: ${escapeXml(sanitizeText(name))} - saved to ${escapeXml(sanitizeText(localPath))}]`;
     }
-    return url ? `[${type}: ${escapeXml(name)} (${escapeXml(url)})]` : `[${type}: ${escapeXml(name)}]`;
+    return url
+      ? `[${sanitizeText(type)}: ${escapeXml(sanitizeText(name))} (${escapeXml(sanitizeText(url))})]`
+      : `[${sanitizeText(type)}: ${escapeXml(sanitizeText(name))}]`;
   });
   return '\n' + parts.join('\n');
 }
@@ -257,7 +269,11 @@ function parseContent(json: string): any {
 }
 
 function escapeXml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return sanitizeText(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 /**

@@ -11,6 +11,15 @@ function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
 }
 
+function sanitizeText(value: string): string {
+  // Drop lone UTF-16 surrogates before handing strings to the SDK; otherwise
+  // the provider request can fail with "request body is not valid JSON".
+  return value.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '',
+  );
+}
+
 // Deferred SDK builtins that either sidestep nanoclaw's own scheduling or
 // don't fit our async message-passing model (they're designed for Claude
 // Code's interactive UI and would hang here).
@@ -75,7 +84,7 @@ class MessageStream {
   push(text: string): void {
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content: sanitizeText(text) },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -239,6 +248,8 @@ const CLAUDE_CODE_AUTO_COMPACT_WINDOW = process.env.CLAUDE_CODE_AUTO_COMPACT_WIN
  * session ID, etc.
  */
 const STALE_SESSION_RE = /no conversation found|ENOENT.*\.jsonl|session.*not found/i;
+const POISONED_SESSION_RE =
+  /request body is not valid JSON: no low surrogate in string|request body is not valid JSON:.*surrogate/i;
 
 export class ClaudeProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = true;
@@ -260,14 +271,16 @@ export class ClaudeProvider implements AgentProvider {
 
   isSessionInvalid(err: unknown): boolean {
     const msg = err instanceof Error ? err.message : String(err);
-    return STALE_SESSION_RE.test(msg);
+    return STALE_SESSION_RE.test(msg) || POISONED_SESSION_RE.test(msg);
   }
 
   query(input: QueryInput): AgentQuery {
     const stream = new MessageStream();
-    stream.push(input.prompt);
+    stream.push(sanitizeText(input.prompt));
 
-    const instructions = input.systemContext?.instructions;
+    const instructions = input.systemContext?.instructions
+      ? sanitizeText(input.systemContext.instructions)
+      : undefined;
 
     const sdkResult = sdkQuery({
       prompt: stream,

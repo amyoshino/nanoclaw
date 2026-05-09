@@ -326,6 +326,12 @@ function buildMounts(
     mounts.push(...validated);
   }
 
+  // Global attachments dir — images/media downloaded from inbound messages land
+  // here on the host; the formatter tells the agent to look at /workspace/attachments/.
+  const attachmentsDir = path.join(DATA_DIR, 'attachments');
+  fs.mkdirSync(attachmentsDir, { recursive: true });
+  mounts.push({ hostPath: attachmentsDir, containerPath: '/workspace/attachments', readonly: true });
+
   // Provider-contributed mounts (e.g. opencode-xdg)
   if (providerContribution.mounts) {
     mounts.push(...providerContribution.mounts);
