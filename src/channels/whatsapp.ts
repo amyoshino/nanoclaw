@@ -746,8 +746,7 @@ registerChannelAdapter('whatsapp', {
       },
 
       async openDM(userHandle: string): Promise<string> {
-        const normalized =
-          userHandle.includes('@') ? userHandle : `${userHandle.split(':')[0]}@s.whatsapp.net`;
+        const normalized = userHandle.includes('@') ? userHandle : `${userHandle.split(':')[0]}@s.whatsapp.net`;
         return await translateJid(normalized);
       },
     };
