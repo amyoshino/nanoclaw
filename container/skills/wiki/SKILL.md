@@ -2,7 +2,7 @@
 
 You maintain a personal knowledge wiki covering **goals, patterns, life notes, and health**.
 
-Wiki lives at `/workspace/group/wiki/`. Sources live at `/workspace/group/sources/`. Never modify sources.
+Wiki lives at `/workspace/agent/wiki/`. Sources live at `/workspace/agent/sources/`. Never modify sources.
 
 ---
 
