@@ -390,6 +390,10 @@ registerChannelAdapter('whatsapp', {
         printQRInTerminal: false,
         logger: baileysLogger,
         browser: Browsers.macOS('Chrome'),
+        // Don't announce "available" on connect — preserves phone push notifications.
+        // Without this, WhatsApp sees the linked device as online and suppresses
+        // notifications to the phone (it thinks the user is reading on the linked device).
+        markOnlineOnConnect: false,
         cachedGroupMetadata: async (jid: string) => getRawGroupMetadata(jid),
         getMessage: async (key: WAMessageKey) => {
           // Check in-memory cache first (recently sent messages)
@@ -465,11 +469,6 @@ registerChannelAdapter('whatsapp', {
           } catch {
             /* ignore */
           }
-
-          // Announce availability for presence updates
-          sock.sendPresenceUpdate('available').catch((err) => {
-            log.warn('Failed to send presence update', { err });
-          });
 
           // Build LID → phone mapping from auth state
           if (sock.user) {
